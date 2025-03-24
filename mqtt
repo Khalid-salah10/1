@@ -1,0 +1,73 @@
+import queue
+from cryptography.fernet import Fernet
+import base64
+
+CLIENT_ID = f'movant-mqtt-{random.randint(0, 1000)}'
+BROKER = 'broker.hivemq.com'
+PORT = 1883
+
+CHAT_ROOMS = {
+    'python': 'movantchat/python'
+}
+
+class Chat:
+    def __init__(self, username, room):
+        self.username = username
+        self.room = room
+        self.topic = CHAT_ROOMS[room]
+        self.client = None
+        self.input_queue = queue.Queue()
+        self.running = True
+
+        passphrase = input("Enter a passphrase: ")
+        self.key = base64.urlsafe_b64encode(bytes(passphrase.ljust(32)[:32], 'utf-8'))
+        self.cipher = Fernet(self.key)
+
+        self.connect_mqtt()
+
+    def on_connect(self, client, userdata, flags, rc):
+        if rc == 0:
+            print("Connected to MQTT Broker!")
+            client.subscribe(self.topic)
+        else:
+            print("Failed to connect")
+
+    def connect_mqtt(self):
+        self.client = paho.Client(CLIENT_ID)
+        self.client.on_connect = self.on_connect
+        self.client.on_message = self.on_message
+        self.client.connect(BROKER, PORT)
+        self.client.loop_start()
+
+    def on_message(self, client, userdata, msg):
+        decrypted_message = self.cipher.decrypt(msg.payload).decode()
+        print(f"{msg.topic}: {decrypted_message}")
+
+    def init_client(self):
+        print(f"{self.username} joined {self.room}")
+        self.client.publish(self.topic, f"{self.username} has joined the chat")
+
+    def run(self):
+        self.init_client()
+        while True:
+            msg_to_send = input("You: ")
+            if msg_to_send.lower() == "quit":
+                self.client.publish(self.topic, f"{self.username} has left the chat")
+                self.running = False
+                break
+            encrypted_message = self.cipher.encrypt(msg_to_send.encode())
+            self.client.publish(self.topic, encrypted_message)
+
+def main():
+    username = input("Enter your username: ")
+
+    print("Pick a room:")
+    for room in CHAT_ROOMS:
+        print(f"\t{room}")
+    room = input("> ")
+
+    chat = Chat(username, room)
+    chat.run()
+
+if __name__ == '__main__':
+    main()
